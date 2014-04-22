@@ -1,0 +1,296 @@
+import java.io.*;
+import java.net.*;
+import java.util.StringTokenizer;
+import java.util.Date;
+
+/**
+ * Java HTTP Server
+ *
+ * This concurrent HTTP server supports GET and HEAD requests.
+ *
+ *  Vedant Bhatt <vbhatt@andrew.cmu.edu>
+ *  Shwetha Durgashankar <sdurgash@andrew.cmu.edu>
+ */
+
+public class Concurrent implements Runnable
+{
+	
+	static File WEB_ROOT = null;
+	static final String DEFAULT_FILE = "index.html";
+	static int port = 8080; //default port
+	Socket connect;
+
+	//constructor
+	public Concurrent(Socket connect)
+	{
+		this.connect = connect;
+	}
+
+
+	/* main method creates a new HttpServer instance for each request and starts it running in a separate thread. */
+	public static void main(String[] args)
+	{
+		if(args.length<2)
+		{
+			System.err.println("ERROR: Too few arguments!");
+			System.exit(1);
+		}
+
+		/* Argument parsing */
+		try
+		{
+			port = Integer.parseInt(args[0]);
+		}
+		catch(Exception e) 
+		{
+			System.err.println("ERROR: Bad port!");
+			System.exit(1);
+		}
+
+		/* Argument check: Exit if port number is not within specified range */
+		if(port > 65535 || port < 1024)
+		{
+			System.err.println("ERROR: Port number should be between 1024 and 65535");
+			System.exit(1);
+		}
+
+		WEB_ROOT = new File(args[1]);
+		System.out.println(WEB_ROOT);
+
+		try
+		{
+			ServerSocket serverConnect = new ServerSocket(port);
+			System.out.println("\nListening for connections on port " + port + "...\n");
+			while (true) //listen until user halts execution
+			{
+				Concurrent server = new Concurrent(serverConnect.accept()); //instantiate HttpServer
+				
+				/* create new thread */
+				Thread threadRunner = new Thread(server);
+				threadRunner.start(); //start thread
+			}
+		}
+		catch (IOException e)
+		{
+			System.err.println("Server error: " + e);
+		}
+	}
+
+
+	/**
+	 * run method services each request in a separate thread.
+	 */
+	public void run()
+	{
+		BufferedReader in = null;
+		PrintWriter out = null;
+		BufferedOutputStream dataOut = null;
+		String fileRequested = null;
+
+		try
+		{
+			in = new BufferedReader(new InputStreamReader(connect.getInputStream()));
+			out = new PrintWriter(connect.getOutputStream());
+			dataOut = new BufferedOutputStream(connect.getOutputStream());
+
+			String input = in.readLine();
+			StringTokenizer parse = new StringTokenizer(input);
+			String method = parse.nextToken().toUpperCase();
+			fileRequested = parse.nextToken().toLowerCase();
+			System.out.println("File Requested: "+fileRequested);
+			String http = parse.nextToken();
+			
+			if (!http.equals("HTTP/1.0") && !http.equals("HTTP/1.1"))
+			{
+				out.println("505, HTTP Version Not Supported");
+				out.println("<HTML>");
+				out.println("<HEAD><TITLE>Not Implemented</TITLE>" +"</HEAD>");
+				out.println("<BODY>");
+				out.println("<H2>505 HTTP Version " + http +" not supported</H2>");
+				out.println("</BODY></HTML>");
+				out.flush();
+				return;
+			}
+
+			/* methods other than GET and HEAD are not implemented */
+			if (!method.equals("GET") && !method.equals("HEAD"))
+			{
+				out.println("HTTP/1.0 501 Not Implemented");
+				out.println("Server: Java HTTP Server 1.0");
+				out.println("Date: " + new Date());
+				out.println("Content-Type: text/html");
+				out.println(); 
+				out.println("<HTML>");
+				out.println("<HEAD><TITLE>Not Implemented</TITLE>" + "</HEAD>");
+				out.println("<BODY>");
+				out.println("<H2>501 Not Implemented: " + method + " method.</H2>");
+				out.println("</BODY></HTML>");
+				out.flush();
+				return;
+			}
+
+			
+			if (fileRequested.endsWith("/"))
+			{
+				/* append default file name to request */
+				fileRequested += DEFAULT_FILE;
+			}
+
+			File file = new File(WEB_ROOT, fileRequested);
+			int fileLength = (int)file.length();
+
+			String content = getContentType(fileRequested);
+
+			/* if request is a GET, send the file content */
+			if (method.equals("GET"))
+			{
+				FileInputStream fileIn = null;
+				byte[] fileData = new byte[fileLength];
+
+				try
+				{
+					fileIn = new FileInputStream(file);
+					fileIn.read(fileData);
+				}
+				finally
+				{
+					close(fileIn); //close file input stream
+				}
+
+				/* send HTTP headers */
+				out.println("HTTP/1.0 200 OK");
+				out.println("Server: Java HTTP Server 1.0");
+				out.println("Date: " + new Date());
+				out.println("Content-type: " + content);
+				out.println("Content-length: " + file.length());
+				out.println(); 
+				out.flush(); //flush character output stream buffer
+
+				dataOut.write(fileData,0,fileLength); //write file
+				dataOut.flush(); //flush binary output stream buffer
+			}
+
+		}
+		catch (FileNotFoundException fnfe)
+		{
+			fileNotFound(out, fileRequested);
+		}
+		catch (IOException ioe)
+		{
+			System.err.println("Server Error: " + ioe);
+		}
+		finally
+		{
+			close(in); //close character input stream
+			close(out); //close character output stream
+			close(dataOut); //close binary output stream
+			close(connect); //close socket connection
+		}
+	}
+
+
+	/**
+	 * fileNotFound informs client that requested file does not
+	 * exist.
+	 *
+	 * Arguments -	 out - Client output stream
+	 * 	         file - File requested by the client
+	 * Return-Type - void
+	 */
+	private void fileNotFound(PrintWriter out, String file)
+	{
+		/* send file not found HTTP headers */
+		out.println("HTTP/1.0 404 File Not Found");
+		out.println("Server: Java HTTP Server 1.0");
+		out.println("Date: " + new Date());
+		out.println("Content-Type: text/html");
+		out.println();
+		out.println("<HTML>");
+		out.println("<HEAD><TITLE>File Not Found</TITLE>" + "</HEAD>");
+		out.println("<BODY>");
+		out.println("<H2>404 File Not Found: " + file + "</H2>");
+		out.println("</BODY>");
+		out.println("</HTML>");
+		out.flush();
+	}
+
+
+	/**
+	 * getContentType returns the proper MIME content type
+	 * according to the requested file's extension.
+	 *
+	 * Arguments -   fileRequested - file requested by the client
+	 * Return-type - String
+	 */
+	private String getContentType(String fileRequested)
+	{
+		if (fileRequested.endsWith(".htm") ||
+				fileRequested.endsWith(".html"))
+		{
+			return "text/html";
+		}
+		else if (fileRequested.endsWith(".png"))
+		{
+			return "image/png";
+		}
+		else if (fileRequested.endsWith(".jpg") ||
+				fileRequested.endsWith(".jpeg"))
+		{
+			return "image/jpeg";
+		}
+		else if (fileRequested.endsWith(".css") ||
+				fileRequested.endsWith(".css"))
+		{
+			return "text/css";
+		}
+		else 
+		{
+			return "text/plain";
+		}
+	}
+
+
+	/**
+	 * close method closes the given stream.
+	 *
+	 * Argument - Stream
+	 * Return-type - void
+	 */
+	public void close(Object stream)
+	{
+		if (stream == null)
+			return;
+
+		try
+		{
+			if (stream instanceof Reader)
+			{
+				((Reader)stream).close();
+			}
+			else if (stream instanceof Writer)
+			{
+				((Writer)stream).close();
+			}
+			else if (stream instanceof InputStream)
+			{
+				((InputStream)stream).close();
+			}
+			else if (stream instanceof OutputStream)
+			{
+				((OutputStream)stream).close();
+			}
+			else if (stream instanceof Socket)
+			{
+				((Socket)stream).close();
+			}
+			else
+			{
+				System.err.println("Unable to close object: " + stream);
+			}
+		}
+		catch (Exception e)
+		{
+			System.err.println("Error closing stream: " + e);
+		}
+	}
+}

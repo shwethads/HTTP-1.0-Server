@@ -1,0 +1,71 @@
+import java.io.*;
+import java.net.*;
+
+public final class Simple {
+	static ServerSocket servSock;
+	
+	public static void main(String[] args) throws Exception {
+		String buffer = null;
+		int port = 8080;
+		String fileRequested = null;
+
+		if(args.length < 1) {
+			System.err.println("ERROR: Too few arguments!");
+			System.exit(1);
+		}
+
+		try {
+			port = Integer.parseInt(args[0]);
+			System.out.println("Port is"+ port);
+		}
+		catch(Exception e) {
+			System.err.println("ERROR: Bad port!");
+			System.exit(1);
+		}
+
+		/* Argument check: Exit if port number is not within specified range */
+		if(port > 65535 || port < 1024) {
+			System.err.println("ERROR: Port number should be between 1024 and 65535");
+			System.exit(1);
+		}
+
+		try {
+			servSock = new ServerSocket();
+		}
+		catch(Exception e) {
+			System.err.println(e);
+		}
+		
+		try {
+			/*
+			 * Create a socket to accept() client connections. This combines socket(), bind() and listen() into one call. 
+			 * Any connection attempts before this are terminated with RST.
+			 */
+			servSock = new ServerSocket(port);
+			System.out.println("Port: "+port);
+		} 
+		catch (IOException e) {
+			System.err.println("ERROR: Unable to listen on port " + port);
+			System.exit(1);
+		}
+
+		while(true) {
+			Socket clientSock;
+			try {
+				/*
+				 * Get a sock for further communication with the client. 
+				 * This socket is sure for this client. Further connections are still accepted on srvSock
+				 */
+				clientSock = servSock.accept();
+				new ServerThread(clientSock, buffer, fileRequested).start();
+			}
+			catch(Exception e) {
+				System.err.println(e);
+				clientSock = null;
+				continue;
+			}
+		}
+		
+	}
+
+}

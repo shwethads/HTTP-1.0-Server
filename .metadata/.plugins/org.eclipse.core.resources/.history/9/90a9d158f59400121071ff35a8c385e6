@@ -1,0 +1,105 @@
+import java.io.*;
+import java.net.*;
+import java.util.StringTokenizer;
+
+public class ServerThread extends Thread {
+	private Socket clientSock = null;
+	BufferedReader inStream = null;
+	DataOutputStream outStream = null;
+	String buffer = null;
+	String fileRequested = null;
+	final File WEB_ROOT = new File("./www");
+
+	public ServerThread(Socket s, String buff, String file) {
+		this.clientSock = s;
+		this.buffer = buff;
+		this.fileRequested = file;
+	}
+
+	public void run() {
+		try {
+			inStream = new BufferedReader(new InputStreamReader(clientSock.getInputStream()));
+			outStream = new DataOutputStream(clientSock.getOutputStream());
+
+			/* Read the data sent by the client */
+			int fileLength = 0;
+			File file = null;
+			byte[] fileData = null;
+
+			buffer = inStream.readLine();
+			if(buffer != null) {	
+				System.out.println("Read from client " + clientSock.getInetAddress() + ":" + clientSock.getPort() + " " + buffer);
+
+				/* String Tokenizer to parse the argument */
+				StringTokenizer parse = new StringTokenizer(buffer);
+				String method = parse.nextToken().trim();
+				fileRequested = parse.nextToken().trim();
+				String httpVersion = parse.nextToken().trim();
+				System.out.println(method + "  " + fileRequested + "  " + httpVersion);
+
+				/* Append default file name to request */
+				if (fileRequested.endsWith("/"))
+					fileRequested += "index.html";
+
+				file = new File(WEB_ROOT, fileRequested);
+				fileLength = (int)file.length();
+				FileInputStream fileIn = null;	
+				fileData = new byte[fileLength];
+				try {
+					fileIn = new FileInputStream(file);
+					fileIn.read(fileData);
+					System.out.println("Size of fileData:"+fileData.length);	
+				}catch (Exception e) {
+					System.out.println(e);
+				}finally {
+					if (fileIn == null)
+						System.err.println("No file read");
+					fileIn.close();
+				}
+
+				if(!httpVersion.equalsIgnoreCase("HTTP/1.1")) {
+					outStream.writeBytes("ERROR: Wrong HTTP");
+					System.out.println("HTTP version error");
+					return;
+				}
+
+				/* If method is HEAD or GET send HTTP headers */													
+				if(method.equalsIgnoreCase("GET") || method.equalsIgnoreCase("HEAD")) {
+					outStream.writeBytes("HTTP/1.1 200 OK");
+					outStream.writeBytes("Server: Java HTTP Server 1.0");
+
+					if(GetMime.getMimeType(fileRequested) == null && fileRequested.endsWith(".css")) {
+						System.out.println("CSS requested");
+						outStream.writeBytes("Content-type: text/css");
+					}
+					else if(fileRequested.endsWith(".png")) {
+						System.out.println("Image requested!");
+						outStream.writeBytes("Content-type: image/png");
+					}
+					else {
+						System.out.println("Text requested");
+						outStream.writeBytes("Content-type: " + GetMime.getMimeType(fileRequested));
+					}
+
+					if(method.equalsIgnoreCase("GET"))
+						outStream.write(fileData, 0, fileLength-1);
+				}
+
+				else
+					outStream.writeBytes("501 Method Unimplemented");
+
+				outStream.flush();
+
+				/* Echo the data back and flush the stream to make sure that the data is sent immediately */
+				outStream.writeBytes(buffer);
+				outStream.flush();
+			}
+			/* Interaction with this client complete, close() the socket */
+			clientSock.close();
+		} 
+		catch (IOException e) {
+			clientSock = null;
+		}
+	}
+}
+
